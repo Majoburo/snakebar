@@ -1,10 +1,10 @@
-# random_space_filling_curves.py
-# Translation of https://observablehq.com/@esperanc/random-space-filling-curves
-# to Python with NumPy. Optional plotting via Matplotlib.
+# snakebar.py
 
+__version__ = "0.1.0"
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Iterable, Iterator, Optional
 import numpy as np
+import sys, time, shutil
 
 Index = int
 Edge = Tuple[Index, Index]
@@ -130,122 +130,189 @@ def hamiltonian_from_spanning_tree(st: SpanningTree) -> Hamiltonian:
 
     return Hamiltonian(nrows=nrows2, ncols=ncols2, path=path)
 
-# ---------- Optional plotting helpers (Matplotlib) ----------
+def _terminal_size() -> Tuple[int, int]:
+    sz = shutil.get_terminal_size(fallback=(80, 24))
+    return sz.columns, sz.lines
 
-def draw_graph(st: SpanningTree, cell_size: float = 10.0):
+def _build_interleaved_canvas(nrows: int, ncols: int, bg=" "):
+    H, W = 2*nrows - 1, 2*ncols - 1
+    return [[bg]*W for _ in range(H)]
+
+def _rc(idx: int, ncols: int):
+    return divmod(idx, ncols)
+
+class SnakeBAR:
     """
-    Visualize the spanning tree edges on the base grid.
+    tqdm-like progress bar using the Hamiltonian 'snake' as the fill visualization.
     """
-    import matplotlib.pyplot as plt
+    def __init__(self, total: int, ch: str = "█", bg: str = " ", seed: Optional[int] = None,
+                 pad_x: int = 0, pad_y: int = 0, desc: str = ""):
+        self.total = max(1, int(total))
+        self.ch, self.bg = ch, bg
+        self.pad_x, self.pad_y = pad_x, pad_y
+        self.desc = desc
 
-    fig, ax = plt.subplots()
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlim(0, st.ncols * cell_size)
-    ax.set_ylim(0, st.nrows * cell_size)
+        cols, lines = _terminal_size()
+        W = max(10, cols - 2*pad_x)
+        H = max(5,  lines - 2*pad_y)
 
-    def X(i): return (_col(i, st.ncols) + 0.5) * cell_size
-    def Y(i): return (_row(i, st.ncols) + 0.5) * cell_size
+        # Choose spanning-tree size to fit interleaved canvas
+        st_nrows = max(1, (H + 1) // 4)
+        st_ncols = max(1, (W + 1) // 4)
 
-    for a, b in st.edges:
-        ax.plot([X(a), X(b)], [Y(a), Y(b)], linewidth=1)
+        st  = grid_spanning_tree(st_ncols, st_nrows, seed=seed)
+        self.ham = hamiltonian_from_spanning_tree(st)
 
-    ax.invert_yaxis()  # match canvas-like coordinates
-    ax.set_xticks([]); ax.set_yticks([])
-    return fig, ax
+        nrows, ncols = self.ham.nrows, self.ham.ncols
+        self.nrows, self.ncols = nrows, ncols
+        self.canvas = _build_interleaved_canvas(nrows, ncols, bg=self.bg)
 
-def draw_path(ham: Hamiltonian, cell_size: float = 10.0, thick: float = 0.5):
+        # Precompute (y, x) draw order: center of first cell, then (edge, next center) pairs
+        order = []
+        path = self.ham.path
+        order.append(("center", _rc(path[0], ncols)))
+        for k in range(len(path) - 1):
+            a, b = path[k], path[k+1]
+            r0, c0 = _rc(a, ncols)
+            r1, c1 = _rc(b, ncols)
+            # edge midpoint
+            if r0 != r1:
+                y = (2*r0 + 2*r1)//2
+                x = 2*c0
+            else:
+                y = 2*r0
+                x = (2*c0 + 2*c1)//2
+            order.append(("edge", (y, x)))
+            order.append(("center", (r1, c1)))
+        # Convert to canvas coordinates
+        self.draw_seq = []
+        for kind, val in order:
+            if kind == "center":
+                r, c = val
+                self.draw_seq.append((2*r, 2*c))
+            else:
+                y, x = val
+                self.draw_seq.append((y, x))
+
+        self._drawn_upto = -1  # last index in draw_seq rendered
+        self._start_time = None
+        self._hidden = False
+
+    # --- Terminal control helpers
+    _hide_cursor = "\x1b[?25l"
+    _show_cursor = "\x1b[?25h"
+    _clear_screen = "\x1b[2J"
+    _home = "\x1b[H"
+
+    def __enter__(self):
+        sys.stdout.write(self._hide_cursor)
+        sys.stdout.flush()
+        self._hidden = True
+        # Clear and position once
+        sys.stdout.write(self._clear_screen + self._home)
+        sys.stdout.flush()
+        self._start_time = time.perf_counter()
+        self._repaint()  # initial empty canvas
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+    def close(self):
+        if self._hidden:
+            sys.stdout.write(self._show_cursor)
+            sys.stdout.flush()
+            self._hidden = False
+
+    def _render_canvas(self) -> str:
+        body = "\n".join("".join(row) for row in self.canvas)
+        if self.pad_x or self.pad_y or self.desc:
+            lines = body.splitlines()
+            if self.desc:
+                # prepend a title line above the art
+                title = self.desc
+                lines = [title] + lines
+            if self.pad_x or self.pad_y:
+                side = " " * self.pad_x
+                lines = ([""] * self.pad_y) + [side + ln + side for ln in lines] + ([""] * self.pad_y)
+            body = "\n".join(lines)
+        return body
+
+    def _repaint(self):
+        sys.stdout.write(self._home)
+        sys.stdout.write(self._render_canvas())
+        sys.stdout.flush()
+
+    def update(self, n: int = 1):
+        """
+        Advance progress by n (like tqdm.update). Redraws only as needed.
+        """
+        # clamp progress
+        n = max(0, n)
+        done = min(self.total, getattr(self, "_progress", 0) + n)
+        self._progress = done
+
+        # Map progress -> how many draw_seq points to reveal
+        total_pts = len(self.draw_seq)
+        frac = done / self.total
+        target_upto = int(frac * (total_pts - 1))
+
+        # Draw newly revealed points
+        for k in range(self._drawn_upto + 1, target_upto + 1):
+            y, x = self.draw_seq[k]
+            if 0 <= y < len(self.canvas) and 0 <= x < len(self.canvas[0]):
+                self.canvas[y][x] = self.ch
+
+        if target_upto > self._drawn_upto:
+            self._drawn_upto = target_upto
+            self._repaint()
+
+    def set_description(self, desc: str):
+        self.desc = desc
+        self._repaint()
+
+    # Convenience: iterate over an iterable like tqdm
+    def wrap(self, iterable: Iterable) -> Iterator:
+        count = 0
+        self.__enter__()
+        try:
+            for item in iterable:
+                yield item
+                count += 1
+                self.update(1)
+        finally:
+            self.close()
+
+# Syntactic sugar function, like tqdm(iterable)
+def snake_bar(iterable: Iterable, **kwargs) -> Iterator:
+    total = len(iterable) if hasattr(iterable, "__len__") else None
+    if total is None:
+        raise ValueError("snake_tqdm requires a sized iterable; or use SnakeTQDM(total=...) manually.")
+    bar = SnakeBAR(total=total, **kwargs)
+    return bar.wrap(iterable)
+
+def main():
     """
-    Visualize the Hamiltonian path on the doubled grid.
+    CLI entry point: renders a snake progress bar for a dummy loop,
+    or can be used to visualize the bar with custom settings.
     """
-    import matplotlib.pyplot as plt
+    import argparse
+    parser = argparse.ArgumentParser(prog="snakebar", description="tqdm-like progress bar that snakes across your terminal")
+    parser.add_argument("-n", "--total", type=int, default=200, help="total number of steps")
+    parser.add_argument("--desc", type=str, default="Snaking...", help="label printed above the bar")
+    parser.add_argument("--seed", type=int, default=None, help="random seed for the path")
+    parser.add_argument("--ch", type=str, default="█", help="character used for the snake (default: full block)")
+    parser.add_argument("--bg", type=str, default=" ", help="background character")
+    parser.add_argument("--sleep", type=float, default=0.01, help="sleep per step (seconds) for the demo")
+    parser.add_argument("--fps", type=int, default=60, help="target frames per second for repaint")
+    parser.add_argument("--spf", type=int, default=1, help="steps per frame before repaint")
+    args = parser.parse_args()
 
-    fig, ax = plt.subplots()
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlim(0, ham.ncols * cell_size)
-    ax.set_ylim(0, ham.nrows * cell_size)
-
-    def X(i): return (_col(i, ham.ncols) + 0.5) * cell_size
-    def Y(i): return (_row(i, ham.ncols) + 0.5) * cell_size
-
-    xs = [X(i) for i in ham.path]
-    ys = [Y(i) for i in ham.path]
-    ax.plot(xs, ys, linewidth=cell_size * thick, solid_joinstyle='round')
-    ax.invert_yaxis()
-    ax.set_xticks([]); ax.set_yticks([])
-    return fig, ax
-
-# ---------- Example usage ----------
+    # Demo: iterate for the given total
+    with SnakeBAR(total=args.total, desc=args.desc, seed=args.seed, ch=args.ch, bg=args.bg) as bar:
+        for _ in range(args.total):
+            time.sleep(max(0.0, args.sleep))
+            bar.update(1)
 
 if __name__ == "__main__":
-    st = grid_spanning_tree(ncols=10, nrows=10, seed=None)  # set seed for reproducibility if desired
-    ham = hamiltonian_from_spanning_tree(st)
-
-    # Optional: draw
-    #fig1, ax1 = draw_graph(st, cell_size=10)
-    fig2, ax2 = draw_path(ham, cell_size=10, thick=0.3)
-    import matplotlib.pyplot as plt
-    plt.show()
-    def ascii_path_raster(ham, scale=3, thickness=1, char="#", bg=" "):
-        """
-        Render the Hamiltonian path as a thick continuous ASCII line.
-
-        Parameters
-        ----------
-        ham : Hamiltonian  (from the code we wrote)
-        scale : int        number of character cells per grid step (>=2 looks good)
-        thickness : int    half-thickness of the stroke in characters (>=1)
-        char : str         draw character (e.g. "#", "*", "@")
-        bg : str           background character (usually space)
-
-        Returns
-        -------
-        str : multiline ASCII art
-        """
-        nrows, ncols = ham.nrows, ham.ncols
-
-        # Canvas dimensions: one "scale" per grid cell, draw at centers.
-        H = nrows * scale
-        W = ncols * scale
-        canvas = [[bg] * W for _ in range(H)]
-
-        def rc(idx):  # (row, col)
-            return divmod(idx, ncols)
-
-        def to_px(r, c):
-            # center of cell in pixel coords
-            return r * scale + scale // 2, c * scale + scale // 2  # (y, x)
-
-        def draw_segment(y0, x0, y1, x1):
-            if x0 == x1:
-                y_start, y_end = (y0, y1) if y0 <= y1 else (y1, y0)
-                for y in range(y_start, y_end + 1):
-                    for dx in range(-thickness, thickness + 1):
-                        xx = x0 + dx
-                        if 0 <= y < H and 0 <= xx < W:
-                            canvas[y][xx] = char
-            elif y0 == y1:
-                x_start, x_end = (x0, x1) if x0 <= x1 else (x1, x0)
-                for x in range(x_start, x_end + 1):
-                    for dy in range(-thickness, thickness + 1):
-                        yy = y0 + dy
-                        if 0 <= yy < H and 0 <= x < W:
-                            canvas[yy][x] = char
-            else:
-                # Path is axis-aligned; this shouldn't happen. Fall back to a simple line.
-                steps = max(abs(x1 - x0), abs(y1 - y0))
-                for t in range(steps + 1):
-                    y = y0 + (y1 - y0) * t // steps
-                    x = x0 + (x1 - x0) * t // steps
-                    if 0 <= y < H and 0 <= x < W:
-                        canvas[y][x] = char
-
-        # Draw the path as connected thick segments
-        for k in range(len(ham.path) - 1):
-            r0, c0 = rc(ham.path[k])
-            r1, c1 = rc(ham.path[k + 1])
-            y0, x0 = to_px(r0, c0)
-            y1, x1 = to_px(r1, c1)
-            draw_segment(y0, x0, y1, x1)
-
-        return "\n".join("".join(row) for row in canvas)
-    print(ascii_path_raster(ham, scale=1,1thickness=1, char = "#"))
+    main()
