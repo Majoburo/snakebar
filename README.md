@@ -1,5 +1,7 @@
 # snakebar
 
+![snakebar](https://github.com/Majoburo/snakebar/blob/main/docs/snakebar.png?raw=true)
+
 A tqdm-like progress bar that fills your terminal with a one-character-thick snake along a random space-filling curve. Based on https://observablehq.com/@esperanc/random-space-filling-curves
 
 ## Installation
