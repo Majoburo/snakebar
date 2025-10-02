@@ -3,7 +3,7 @@
 __version__ = "0.1.0"
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Iterable, Iterator, Optional
-import numpy as np
+import random, math
 import sys, time, shutil
 
 Index = int
@@ -34,9 +34,9 @@ def grid_spanning_tree(ncols: int, nrows: int, seed: int | None = None) -> Spann
     Create a random spanning tree over an ncols x nrows grid using DFS with shuffled neighbors.
     Matches the Observable logic (including the connect[] bookkeeping).
     """
-    rng = np.random.default_rng(seed)
+    rng = random.Random(seed)
     N = ncols * nrows
-    visited = np.zeros(N, dtype=bool)
+    visited = [False] * N
     edges: List[Edge] = []
 
     def neighbors(k: int) -> List[int]:
@@ -56,7 +56,7 @@ def grid_spanning_tree(ncols: int, nrows: int, seed: int | None = None) -> Spann
                 edges.append((k, n))
                 visit(n)
 
-    start = int(rng.integers(0, N))
+    start = rng.randrange(N)
     visit(start)
 
     connect = [dict(left=False, right=False, up=False, down=False) for _ in range(N)]
@@ -119,7 +119,7 @@ def hamiltonian_from_spanning_tree(st: SpanningTree) -> Hamiltonian:
 
     # Walk the cycle to produce a single Hamiltonian path over all doubled-grid nodes
     # In this construction, number of edges equals number of nodes (2-regular, one cycle).
-    visited = np.zeros(N2, dtype=bool)
+    visited = [False] * N2
     j = 0
     path: List[int] = []
     for _ in range(len(edges2)):
@@ -239,7 +239,7 @@ class SnakeBAR:
         remaining = ((total - done) / rate) if rate > 0 else float("inf")
 
         def fmt_time(t: float) -> str:
-            if not np.isfinite(t):
+            if not math.isfinite(t):
                 return "--:--"
             s = int(round(t))
             m, s = divmod(s, 60)
