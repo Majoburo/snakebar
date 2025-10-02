@@ -11,18 +11,18 @@ pip install snakebar
 
 ### Basic Python usage
 
-Using `snake_tqdm` as a drop-in replacement for tqdm:
+Using `snake_bar` as a drop-in replacement for tqdm:
 ```python
-from snakebar import snake_tqdm
-for i in snake_tqdm(range(100)):
+from snakebar import snake_bar
+for i in snake_bar(range(100)):
     # your code here
     pass
 ```
 
-Using `SnakeTQDM` for manual progress bar updates:
+Using `SnakeBAR` for manual progress bar updates:
 ```python
-from snakebar import SnakeTQDM
-with SnakeTQDM(total=100) as pbar:
+from snakebar import SnakeBAR
+with SnakeBAR(total=100) as pbar:
     for i in range(100):
         # your code here
         pbar.update(1)
