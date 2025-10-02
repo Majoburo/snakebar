@@ -56,5 +56,5 @@ uv pip install -e .
 
 To run the CLI demo during development:
 ```bash
-snakebar -n 100 --desc "Demo" --sleep 0.05
+snakebar -n 5000 --desc "Demo" --sleep 0.05
 ```
