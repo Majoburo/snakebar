@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Majo Bustamante Rosell" }]
-dependencies = ["numpy>=1.23"]
 
 [project.urls]
 Homepage = "https://github.com/majoburo/snakebar"
