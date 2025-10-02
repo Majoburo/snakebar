@@ -212,6 +212,7 @@ class SnakeBAR:
         sys.stdout.write(self._clear_screen + self._home)
         sys.stdout.flush()
         self._start_time = time.perf_counter()
+        self._progress = 0
         self._repaint()  # initial empty canvas
         return self
 
@@ -224,13 +225,42 @@ class SnakeBAR:
             sys.stdout.flush()
             self._hidden = False
 
+    def _format_status(self) -> str:
+        """Return a tqdm-like status line with desc, percent, counts, ETA and rate."""
+        done = getattr(self, "_progress", 0)
+        total = self.total
+        frac = done / total if total else 0.0
+        pct = int(frac * 100)
+
+        # timing
+        start = self._start_time or time.perf_counter()
+        elapsed = max(0.0, time.perf_counter() - start)
+        rate = (done / elapsed) if elapsed > 0 else 0.0
+        remaining = ((total - done) / rate) if rate > 0 else float("inf")
+
+        def fmt_time(t: float) -> str:
+            if not np.isfinite(t):
+                return "--:--"
+            s = int(round(t))
+            m, s = divmod(s, 60)
+            h, m = divmod(m, 60)
+            if h > 0:
+                return f"{h:02d}:{m:02d}:{s:02d}"
+            return f"{m:02d}:{s:02d}"
+
+        e_str = fmt_time(elapsed)
+        r_str = fmt_time(remaining)
+        rate_str = f"{rate:0.2f} it/s"
+        desc = self.desc if self.desc else "Snaking"
+        return f"{desc} {pct:3d}%|{done}/{total} [{e_str}<{r_str}, {rate_str}]"
+
     def _render_canvas(self) -> str:
         body = "\n".join("".join(row) for row in self.canvas)
         if self.pad_x or self.pad_y or self.desc:
             lines = body.splitlines()
             if self.desc:
                 # prepend a title line above the art
-                title = self.desc
+                title = self._format_status()
                 lines = [title] + lines
             if self.pad_x or self.pad_y:
                 side = " " * self.pad_x
