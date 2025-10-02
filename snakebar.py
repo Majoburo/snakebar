@@ -1,6 +1,6 @@
 # snakebar.py
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Iterable, Iterator, Optional
 import random, math
