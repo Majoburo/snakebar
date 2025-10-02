@@ -7,12 +7,6 @@ A tqdm-like progress bar that fills your terminal with a one-character-thick sna
 pip install snakebar
 ```
 
-### Installation with uv
-If you are using `uv` as your Python environment manager, you can install snakebar with:
-```bash
-uv pip install snakebar
-```
-
 ## Usage
 
 ### Basic Python usage
@@ -46,15 +40,3 @@ Options:
 - `-n`, `--total`: Total number of steps (default 100)
 - `--desc`: Description text to show alongside the progress bar
 - `--sleep`: Time in seconds to sleep between steps (simulates work)
-
-## Development
-
-To install snakebar in editable mode for development, run:
-```bash
-uv pip install -e .
-```
-
-To run the CLI demo during development:
-```bash
-snakebar -n 100 --desc "Demo" --sleep 0.05
-```
