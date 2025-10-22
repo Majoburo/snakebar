@@ -533,16 +533,28 @@ class MultiSnakeBAR:
 
     def _render_canvas(self) -> str:
         # Render canvas with colors using StringIO for better performance
+        # Optimize: only output color codes when color changes
         io = StringIO()
+        current_color = ""
         for row_idx, row in enumerate(self.canvas):
             for col_idx, char in enumerate(row):
                 color = self.canvas_colors[row_idx][col_idx]
-                if color:
-                    io.write(f"{color}{char}{_RESET_COLOR}")
-                else:
-                    io.write(char)
+                if color != current_color:
+                    if current_color:
+                        io.write(_RESET_COLOR)
+                    if color:
+                        io.write(color)
+                    current_color = color
+                io.write(char)
             if row_idx < len(self.canvas) - 1:
+                # Reset color at end of line to avoid bleeding
+                if current_color:
+                    io.write(_RESET_COLOR)
+                    current_color = ""
                 io.write("\n")
+        # Final reset if needed
+        if current_color:
+            io.write(_RESET_COLOR)
         body = io.getvalue()
 
         if self.pad_x or self.pad_y or self.desc or True:  # Always show status for multi-snake
@@ -564,10 +576,22 @@ class MultiSnakeBAR:
         if not self._dirty and not force:
             return
 
-        # Rate limit repaints to max 60 FPS (16.67ms between frames) unless forced
+        # Adaptive rate limiting: repaint less frequently as canvas fills up
+        # This dramatically speeds up the final iterations
         current_time = time.perf_counter()
-        if not force and (current_time - self._last_repaint) < 0.0167:
-            return
+        if not force:
+            # Calculate fill percentage
+            total_cells = len(self.canvas) * len(self.canvas[0])
+            filled_cells = sum(self._progress)
+            fill_ratio = filled_cells / (self.total * self.n_snakes)
+
+            # Adaptive interval: start at 60 FPS (16.67ms), slow to 10 FPS (100ms) as it fills
+            min_interval = 0.0167  # 60 FPS
+            max_interval = 0.100   # 10 FPS
+            interval = min_interval + (max_interval - min_interval) * (fill_ratio ** 2)
+
+            if (current_time - self._last_repaint) < interval:
+                return
 
         self._last_repaint = current_time
         self._dirty = False
