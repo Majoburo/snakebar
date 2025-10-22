@@ -142,6 +142,49 @@ def _build_interleaved_canvas(nrows: int, ncols: int, bg=" "):
 def _rc(idx: int, ncols: int):
     return divmod(idx, ncols)
 
+def _compute_draw_sequence(ham: Hamiltonian) -> List[Tuple[int, int]]:
+    """Compute the drawing sequence from a Hamiltonian path"""
+    order = []
+    path = ham.path
+    ncols = ham.ncols
+    order.append(("center", _rc(path[0], ncols)))
+
+    for k in range(len(path) - 1):
+        a, b = path[k], path[k+1]
+        r0, c0 = _rc(a, ncols)
+        r1, c1 = _rc(b, ncols)
+        # edge between adjacent cells in interleaved canvas
+        if r0 != r1:
+            y = (2*r0 + 2*r1) // 2
+            x = 2*c0
+        else:
+            y = 2*r0
+            x = (2*c0 + 2*c1) // 2
+        order.append(("edge", (y, x)))
+        order.append(("center", (r1, c1)))
+
+    # Convert to canvas coordinates
+    draw_seq = []
+    for kind, val in order:
+        if kind == "center":
+            r, c = val
+            draw_seq.append((2*r, 2*c))
+        else:
+            y, x = val
+            draw_seq.append((y, x))
+    return draw_seq
+
+def _fmt_time(t: float) -> str:
+    """Format elapsed time as HH:MM:SS or MM:SS"""
+    if not math.isfinite(t):
+        return "--:--"
+    s = int(round(t))
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
 # ANSI color codes for multi-snake mode
 _COLORS = [
     "\x1b[91m",  # Bright red
@@ -184,33 +227,7 @@ class SnakeBAR:
         nrows, ncols = self.ham.nrows, self.ham.ncols
         self.nrows, self.ncols = nrows, ncols
         self.canvas = _build_interleaved_canvas(nrows, ncols, bg=self.bg)
-
-        # Precompute (y, x) draw order: center of first cell, then (edge, next center) pairs
-        order = []
-        path = self.ham.path
-        order.append(("center", _rc(path[0], ncols)))
-        for k in range(len(path) - 1):
-            a, b = path[k], path[k+1]
-            r0, c0 = _rc(a, ncols)
-            r1, c1 = _rc(b, ncols)
-            # edge midpoint
-            if r0 != r1:
-                y = (2*r0 + 2*r1)//2
-                x = 2*c0
-            else:
-                y = 2*r0
-                x = (2*c0 + 2*c1)//2
-            order.append(("edge", (y, x)))
-            order.append(("center", (r1, c1)))
-        # Convert to canvas coordinates
-        self.draw_seq = []
-        for kind, val in order:
-            if kind == "center":
-                r, c = val
-                self.draw_seq.append((2*r, 2*c))
-            else:
-                y, x = val
-                self.draw_seq.append((y, x))
+        self.draw_seq = _compute_draw_sequence(self.ham)
 
         self._drawn_upto = -1  # last index in draw_seq rendered
         self._start_time = None
@@ -255,24 +272,13 @@ class SnakeBAR:
         frac = done / total if total else 0.0
         pct = int(frac * 100)
 
-        # timing
         start = self._start_time or time.perf_counter()
         elapsed = max(0.0, time.perf_counter() - start)
         rate = (done / elapsed) if elapsed > 0 else 0.0
         remaining = ((total - done) / rate) if rate > 0 else float("inf")
 
-        def fmt_time(t: float) -> str:
-            if not math.isfinite(t):
-                return "--:--"
-            s = int(round(t))
-            m, s = divmod(s, 60)
-            h, m = divmod(m, 60)
-            if h > 0:
-                return f"{h:02d}:{m:02d}:{s:02d}"
-            return f"{m:02d}:{s:02d}"
-
-        e_str = fmt_time(elapsed)
-        r_str = fmt_time(remaining)
+        e_str = _fmt_time(elapsed)
+        r_str = _fmt_time(remaining)
         rate_str = f"{rate:0.2f} it/s"
         desc = self.desc if self.desc else "Snaking"
         return f"{desc} {pct:3d}%|{done}/{total} [{e_str}<{r_str}, {rate_str}]"
@@ -397,60 +403,18 @@ class MultiSnakeBAR:
         nrows, ncols = self.ham.nrows, self.ham.ncols
         self.nrows, self.ncols = nrows, ncols
         self.canvas = _build_interleaved_canvas(nrows, ncols, bg=self.bg)
-
-        # Initialize color canvas (empty strings mean no color)
         self.canvas_colors = [[""] * len(self.canvas[0]) for _ in range(len(self.canvas))]
-        # Initialize snake index tracker (0 = empty, 1-n = snake index)
         self.canvas_snake_idx = [[0] * len(self.canvas[0]) for _ in range(len(self.canvas))]
+        self.draw_seq = _compute_draw_sequence(self.ham)
 
-        # Precompute draw order (same as single snake)
-        order = []
-        path = self.ham.path
-        order.append(("center", _rc(path[0], ncols)))
-
-        for k in range(len(path) - 1):
-            a, b = path[k], path[k+1]
-            r0, c0 = _rc(a, ncols)
-            r1, c1 = _rc(b, ncols)
-            # edge midpoint
-            if r0 != r1:
-                y = (2*r0 + 2*r1)//2
-                x = 2*c0
-            else:
-                y = 2*r0
-                x = (2*c0 + 2*c1)//2
-            order.append(("edge", (y, x)))
-            order.append(("center", (r1, c1)))
-
-        # Convert to canvas coordinates
-        self.draw_seq = []
-        for kind, val in order:
-            if kind == "center":
-                r, c = val
-                self.draw_seq.append((2*r, 2*c))
-            else:
-                y, x = val
-                self.draw_seq.append((y, x))
-
-        # Create non-overlapping segments - each snake gets its own exclusive path section
+        # Create non-overlapping segments
         total_pts = len(self.draw_seq)
         segment_size = total_pts // n_snakes
-
-        self.snake_segments = []
         self.segment_boundaries = []
 
         for i in range(n_snakes):
-            # Non-overlapping: each snake starts where the previous one ended
             start_idx = i * segment_size
-            start_idx = max(0, min(start_idx, total_pts - 1))
-
-            end_idx = min(start_idx + segment_size, total_pts)
-            if i == n_snakes - 1:
-                end_idx = total_pts  # Last snake extends to end to cover any remainder
-
-            self.segment_boundaries.append(start_idx)
-            self.snake_segments.append(self.draw_seq[start_idx:end_idx])
-
+            self.segment_boundaries.append(max(0, min(start_idx, total_pts - 1)))
         self.segment_boundaries.append(total_pts)
 
         self._drawn_upto = [0] * n_snakes  # one per snake
@@ -501,33 +465,20 @@ class MultiSnakeBAR:
         rate = (done_total / elapsed) if elapsed > 0 else 0.0
         remaining = ((total_all - done_total) / rate) if rate > 0 else float("inf")
 
-        def fmt_time(t: float) -> str:
-            if not math.isfinite(t):
-                return "--:--"
-            s = int(round(t))
-            m, s = divmod(s, 60)
-            h, m = divmod(m, 60)
-            if h > 0:
-                return f"{h:02d}:{m:02d}:{s:02d}"
-            return f"{m:02d}:{s:02d}"
-
-        e_str = fmt_time(elapsed)
-        r_str = fmt_time(remaining)
+        e_str = _fmt_time(elapsed)
+        r_str = _fmt_time(remaining)
         rate_str = f"{rate:0.2f} it/s"
         desc = self.desc if self.desc else f"Multi-snaking ({self.n_snakes} snakes)"
 
-        # Show individual snake progress
         snake_status = " ".join([f"S{i+1}:{self._progress[i]}/{self.total}" for i in range(self.n_snakes)])
-
         status = f"{desc} {pct:3d}%|{done_total}/{total_all} [{snake_status}] [{e_str}<{r_str}, {rate_str}]"
 
-        # Truncate to max_width if specified to prevent wrapping
-        if max_width is not None and len(status) > max_width:
-            status = status[:max_width-3] + "..."
-
-        # Pad to consistent width to prevent jitter
-        if max_width is not None and len(status) < max_width:
-            status = status.ljust(max_width)
+        # Truncate or pad to max_width if specified
+        if max_width is not None:
+            if len(status) > max_width:
+                status = status[:max_width-3] + "..."
+            else:
+                status = status.ljust(max_width)
 
         return status
 
@@ -606,22 +557,18 @@ class MultiSnakeBAR:
         done = min(self.total, self._progress[snake_idx] + n)
         self._progress[snake_idx] = done
 
-        # Each snake draws through its own segment
-        segment = self.snake_segments[snake_idx]
-        total_pts = len(segment)
+        # Compute this snake's segment range on-the-fly
+        seg_start = self.segment_boundaries[snake_idx]
+        seg_end = self.segment_boundaries[snake_idx + 1]
+        total_pts = seg_end - seg_start
 
-        if done >= self.total:
-            target_upto = total_pts
-        else:
-            frac = done / self.total
-            target_upto = int(math.ceil(frac * total_pts))
+        target_upto = total_pts if done >= self.total else int(math.ceil((done / self.total) * total_pts))
 
-        # Draw new points in this snake's segment - don't overwrite other snakes
+        # Draw new points in this snake's segment
         if target_upto > self._drawn_upto[snake_idx]:
             for k in range(self._drawn_upto[snake_idx], target_upto):
-                y, x = segment[k]
+                y, x = self.draw_seq[seg_start + k]
                 if 0 <= y < len(self.canvas) and 0 <= x < len(self.canvas[0]):
-                    # Only draw if cell is empty
                     if self.canvas_snake_idx[y][x] == 0:
                         self.canvas[y][x] = self.ch
                         self.canvas_colors[y][x] = self.colors[snake_idx]
