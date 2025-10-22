@@ -613,35 +613,14 @@ class MultiSnakeBAR:
         """Update all snakes together by n steps - each draws independently"""
         # Batch update: update all snakes' canvas state first, then repaint once
         any_changes = False
-        last_snake_at_100 = False
 
         for snake_idx in range(self.n_snakes):
             changed = self._update_snake_internal(snake_idx, n)
             any_changes = any_changes or changed
 
-            # Check if last snake reached 100%
-            if snake_idx == self.n_snakes - 1 and self._progress[snake_idx] >= self.total:
-                last_snake_at_100 = True
-
-        # Special handling for last snake at 100% - fill remaining empty cells
-        if last_snake_at_100:
-            # Only check the last snake's segment range (where empty cells are likely to be)
-            last_seg_start = self.segment_boundaries[self.n_snakes - 1]
-            for k in range(last_seg_start, len(self.draw_seq)):
-                y, x = self.draw_seq[k]
-                if 0 <= y < len(self.canvas) and 0 <= x < len(self.canvas[0]):
-                    if self.canvas[y][x] == self.bg:
-                        self.canvas[y][x] = self.ch
-                        self.canvas_colors[y][x] = self.colors[self.n_snakes - 1]
-                        self.canvas_snake_idx[y][x] = self.n_snakes
-                        self._dirty = True
-
         # Repaint once at the end if anything changed
-        if any_changes or self._dirty:
-            if last_snake_at_100:
-                self._repaint(force=True)  # Force final repaint
-            else:
-                self._repaint()
+        if any_changes:
+            self._repaint()
 
     def update_snake(self, snake_idx: int, n: int = 1):
         """Update a specific snake - draws independently through its segment"""
@@ -654,21 +633,8 @@ class MultiSnakeBAR:
         # Update the snake's state
         changed = self._update_snake_internal(idx, n)
 
-        # Special handling for last snake at 100% - ensure it fills to the very end
-        if idx == self.n_snakes - 1 and self._progress[idx] >= self.total:
-            # Only check the last snake's segment range (where empty cells are likely to be)
-            last_seg_start = self.segment_boundaries[self.n_snakes - 1]
-            for k in range(last_seg_start, len(self.draw_seq)):
-                y, x = self.draw_seq[k]
-                if 0 <= y < len(self.canvas) and 0 <= x < len(self.canvas[0]):
-                    if self.canvas[y][x] == self.bg:
-                        self.canvas[y][x] = self.ch
-                        self.canvas_colors[y][x] = self.colors[idx]
-                        self.canvas_snake_idx[y][x] = idx + 1
-                        self._dirty = True
-            if self._dirty:
-                self._repaint(force=True)  # Force repaint to bypass rate limiting
-        elif changed:
+        # Repaint if anything changed
+        if changed:
             self._repaint()
 
     def set_description(self, desc: str):
